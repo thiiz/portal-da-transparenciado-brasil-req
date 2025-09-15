@@ -15,7 +15,7 @@ from .models import DownloadResult, ExtractionResult
 class PEPDownloaderBot:
     """Bot principal que orquestra o download e extração de arquivos PEP."""
     
-    BASE_URL = "https://dadosabertos-download.cgu.gov.br/PortalDaTransparencia/saida/pep"
+    BASE_URL = "https://portaldatransparencia.gov.br/download-de-dados/pep"
     
     def __init__(self, 
                  download_dir: str = "downloads",
@@ -51,9 +51,21 @@ class PEPDownloaderBot:
         """
         self.logger.info("=== PEP Downloader Bot - Portal da Transparência ===")
         
-        # Gerar nome do arquivo baseado na data atual
-        filename = self.date_generator.get_current_month_filename()
-        self.logger.info(f"Arquivo alvo: {filename}")
+        # Encontrar arquivo mais recente disponível
+        filename = self._find_latest_available_file()
+        if not filename:
+            error_msg = "Nenhum arquivo PEP disponível encontrado"
+            self.logger.error(error_msg)
+            return DownloadResult(
+                success=False,
+                filename="",
+                file_path="",
+                file_size=0,
+                download_time=0,
+                error_message=error_msg
+            ), None
+        
+        self.logger.info(f"Arquivo mais recente disponível: {filename}")
         
         # Preparar ambiente
         self.file_manager.ensure_download_directory()
@@ -97,9 +109,41 @@ class PEPDownloaderBot:
         
         return download_result, extraction_result
     
+    def _find_latest_available_file(self) -> Optional[str]:
+        """
+        Encontra o arquivo PEP mais recente disponível no servidor.
+        
+        Returns:
+            str: Nome do arquivo mais recente ou None se nenhum encontrado
+        """
+        self.logger.info("Procurando arquivo PEP mais recente disponível...")
+        
+        # Obter lista de meses para verificar
+        months_to_check = self.date_generator.get_available_months(months_back=6)
+        
+        for year_month in months_to_check:
+            filename = f"{year_month}_PEP.zip"
+            url = f"{self.BASE_URL}/{year_month}"
+            
+            try:
+                self.logger.debug(f"Verificando: {url}")
+                response = self.http_client.session.head(url, timeout=10, allow_redirects=True)
+                # Status 200 (OK) ou 302 (Redirect) indicam que o arquivo está disponível
+                if response.status_code in [200, 302]:
+                    self.logger.info(f"✓ Encontrado: {filename} (Status: {response.status_code})")
+                    return filename
+                else:
+                    self.logger.debug(f"✗ Não disponível: {filename} (Status: {response.status_code})")
+            except Exception as e:
+                self.logger.debug(f"✗ Erro ao verificar {filename}: {str(e)}")
+        
+        return None
+    
     def _download_file(self, filename: str) -> DownloadResult:
         """Realiza o download do arquivo PEP."""
-        url = f"{self.BASE_URL}/{filename}"
+        # Extrair AAAAMM do filename (ex: 202509_PEP.zip -> 202509)
+        year_month = filename.split('_')[0]
+        url = f"{self.BASE_URL}/{year_month}"
         file_path = self.file_manager.get_download_path(filename)
         
         self.logger.info(f"URL de download: {url}")
@@ -193,14 +237,16 @@ class PEPDownloaderBot:
                 year -= 1
             
             filename = f"{year:04d}{month:02d}_PEP.zip"
-            url = f"{self.BASE_URL}/{filename}"
+            year_month = f"{year:04d}{month:02d}"
+            url = f"{self.BASE_URL}/{year_month}"
             
             # Verificar se arquivo existe
             try:
-                response = self.http_client.session.head(url, timeout=10)
-                if response.status_code == 200:
+                response = self.http_client.session.head(url, timeout=10, allow_redirects=True)
+                # Status 200 (OK) ou 302 (Redirect) indicam que o arquivo está disponível
+                if response.status_code in [200, 302]:
                     available_files.append(filename)
-                    self.logger.info(f"✓ Disponível: {filename}")
+                    self.logger.info(f"✓ Disponível: {filename} (Status: {response.status_code})")
                 else:
                     self.logger.debug(f"✗ Não disponível: {filename} (Status: {response.status_code})")
             except Exception as e:

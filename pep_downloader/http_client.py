@@ -41,7 +41,7 @@ class HTTPClient:
                 self.logger.info(f"Iniciando download (tentativa {attempt + 1}/{self.max_retries}): {url}")
                 
                 # Primeiro fazer uma requisição HEAD para verificar se o arquivo existe
-                head_response = self.session.head(url, timeout=10)
+                head_response = self.session.head(url, timeout=10, allow_redirects=True)
                 self.logger.debug(f"Status da verificação HEAD: {head_response.status_code}")
                 
                 if head_response.status_code == 404:
@@ -50,7 +50,7 @@ class HTTPClient:
                 elif head_response.status_code == 403:
                     self.logger.warning("Acesso negado na verificação HEAD, tentando download direto...")
                 
-                response = self.session.get(url, stream=True, timeout=30)
+                response = self.session.get(url, stream=True, timeout=30, allow_redirects=True)
                 response.raise_for_status()
                 
                 # Obter tamanho do arquivo se disponível
